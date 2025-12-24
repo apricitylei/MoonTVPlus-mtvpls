@@ -266,7 +266,8 @@ const EpisodeSelector: React.FC<EpisodeSelectorProps> = ({
       if (
         !optimizationEnabled || // 若关闭测速则直接退出
         activeTab !== 'sources' ||
-        availableSources.length === 0
+        availableSources.length === 0 ||
+        currentSource === 'openlist' // 私人影库不进行测速
       )
         return;
 
@@ -293,7 +294,7 @@ const EpisodeSelector: React.FC<EpisodeSelectorProps> = ({
 
     fetchVideoInfosInBatches();
     // 依赖项保持与之前一致
-  }, [activeTab, availableSources, getVideoInfo, optimizationEnabled, initialTestingCompleted]);
+  }, [activeTab, availableSources, getVideoInfo, optimizationEnabled, initialTestingCompleted, currentSource]);
 
   // 升序分页标签
   const categoriesAsc = useMemo(() => {
@@ -848,6 +849,11 @@ const EpisodeSelector: React.FC<EpisodeSelectorProps> = ({
                             </div>
                             {/* 重新测试按钮 */}
                             {(() => {
+                              // 私人影库不显示重新测试按钮
+                              if (source.source === 'openlist') {
+                                return null;
+                              }
+
                               const sourceKey = `${source.source}-${source.id}`;
                               const isTesting = retestingSources.has(sourceKey);
                               const videoInfo = videoInfoMap.get(sourceKey);
