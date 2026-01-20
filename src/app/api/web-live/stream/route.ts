@@ -56,9 +56,10 @@ export async function GET(request: NextRequest) {
 
       const { sFlvUrl, sStreamName, sFlvUrlSuffix, sFlvAntiCode } = streamInfo;
       const newAntiCode = getAntiCode(sFlvAntiCode, sStreamName);
-      const url = `${sFlvUrl}/${sStreamName}.${sFlvUrlSuffix}?${newAntiCode}`;
+      const streamUrl = `${sFlvUrl}/${sStreamName}.${sFlvUrlSuffix}?${newAntiCode}`;
+      const proxyUrl = `/api/web-live/proxy/proxy.flv?url=${encodeURIComponent(streamUrl)}`;
 
-      return NextResponse.json({ url });
+      return NextResponse.json({ url: proxyUrl });
     }
 
     return NextResponse.json({ error: '不支持的平台' }, { status: 400 });

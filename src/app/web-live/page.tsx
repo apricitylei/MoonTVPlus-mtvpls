@@ -94,6 +94,7 @@ export default function WebLivePage() {
       url: videoUrl,
       isLive: true,
       autoplay: true,
+      fullscreen: true,
       customType: {
         m3u8: m3u8Loader,
         flv: flvLoader
