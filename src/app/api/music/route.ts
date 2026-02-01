@@ -50,6 +50,86 @@ async function proxyRequest(
   }
 }
 
+// 获取方法配置并执行请求
+async function executeMethod(
+  baseUrl: string,
+  platform: string,
+  func: string,
+  variables: Record<string, string> = {}
+): Promise<any> {
+  // 1. 获取方法配置
+  const cacheKey = `method-config-${platform}-${func}`;
+  let config: any;
+
+  const cached = serverCache.methodConfigs.get(cacheKey);
+  if (cached && Date.now() - cached.timestamp < serverCache.CACHE_DURATION) {
+    config = cached.data.data;
+  } else {
+    const response = await proxyRequest(`${baseUrl}/v1/methods/${platform}/${func}`);
+    const data = await response.json();
+    serverCache.methodConfigs.set(cacheKey, { data, timestamp: Date.now() });
+    config = data.data;
+  }
+
+  if (!config) {
+    throw new Error('无法获取方法配置');
+  }
+
+  // 2. 替换模板变量
+  let url = config.url;
+  const params: Record<string, string> = {};
+
+  if (config.params) {
+    for (const [key, value] of Object.entries(config.params)) {
+      let processedValue = String(value);
+      // 替换所有模板变量
+      for (const [varName, varValue] of Object.entries(variables)) {
+        processedValue = processedValue.replace(`{{${varName}}}`, varValue);
+      }
+      params[key] = processedValue;
+    }
+  }
+
+  // 3. 构建完整 URL
+  if (config.method === 'GET' && Object.keys(params).length > 0) {
+    const urlObj = new URL(url);
+    for (const [key, value] of Object.entries(params)) {
+      urlObj.searchParams.append(key, value);
+    }
+    url = urlObj.toString();
+  }
+
+  // 4. 发起请求
+  const requestOptions: RequestInit = {
+    method: config.method || 'GET',
+    headers: config.headers || {},
+  };
+
+  if (config.method === 'POST' && config.body) {
+    requestOptions.body = JSON.stringify(config.body);
+    requestOptions.headers = {
+      ...requestOptions.headers,
+      'Content-Type': 'application/json',
+    };
+  }
+
+  const response = await proxyRequest(url, requestOptions);
+  let data = await response.json();
+
+  // 5. 执行 transform 函数（如果有）
+  if (config.transform) {
+    try {
+      // eslint-disable-next-line no-eval
+      const transformFn = eval(`(${config.transform})`);
+      data = transformFn(data);
+    } catch (err) {
+      console.error('Transform 函数执行失败:', err);
+    }
+  }
+
+  return data;
+}
+
 // GET 请求处理
 export async function GET(request: NextRequest) {
   try {
@@ -74,29 +154,8 @@ export async function GET(request: NextRequest) {
 
     // 处理不同的 action
     switch (action) {
-      case 'methods': {
-        // 获取所有平台方法
-        const cacheKey = 'methods-all';
-        const cached = serverCache.methodConfigs.get(cacheKey);
-
-        if (cached && Date.now() - cached.timestamp < serverCache.CACHE_DURATION) {
-          console.log('使用缓存: methods');
-          return NextResponse.json(cached.data);
-        }
-
-        const response = await proxyRequest(`${baseUrl}/v1/methods`);
-        const data = await response.json();
-
-        serverCache.methodConfigs.set(cacheKey, {
-          data,
-          timestamp: Date.now(),
-        });
-
-        return NextResponse.json(data);
-      }
-
-      case 'platform-methods': {
-        // 获取指定平台的方法
+      case 'toplists': {
+        // 获取排行榜列表
         const platform = searchParams.get('platform');
         if (!platform) {
           return NextResponse.json(
@@ -105,95 +164,96 @@ export async function GET(request: NextRequest) {
           );
         }
 
-        const cacheKey = `platform-methods-${platform}`;
-        const cached = serverCache.methodConfigs.get(cacheKey);
-
-        if (cached && Date.now() - cached.timestamp < serverCache.CACHE_DURATION) {
-          console.log(`使用缓存: platform-methods-${platform}`);
-          return NextResponse.json(cached.data);
-        }
-
-        const response = await proxyRequest(`${baseUrl}/v1/methods/${platform}`);
-        const data = await response.json();
-
-        serverCache.methodConfigs.set(cacheKey, {
-          data,
-          timestamp: Date.now(),
-        });
-
-        return NextResponse.json(data);
-      }
-
-      case 'method-config': {
-        // 获取指定平台指定方法的配置
-        const platform = searchParams.get('platform');
-        const func = searchParams.get('function');
-        if (!platform || !func) {
-          return NextResponse.json(
-            { error: '缺少 platform 或 function 参数' },
-            { status: 400 }
-          );
-        }
-
-        const cacheKey = `method-config-${platform}-${func}`;
-        const cached = serverCache.methodConfigs.get(cacheKey);
-
-        if (cached && Date.now() - cached.timestamp < serverCache.CACHE_DURATION) {
-          console.log(`使用缓存: method-config-${platform}-${func}`);
-          return NextResponse.json(cached.data);
-        }
-
-        const response = await proxyRequest(
-          `${baseUrl}/v1/methods/${platform}/${func}`
-        );
-        const data = await response.json();
-
-        serverCache.methodConfigs.set(cacheKey, {
-          data,
-          timestamp: Date.now(),
-        });
-
-        return NextResponse.json(data);
-      }
-
-      case 'proxy': {
-        // 代理上游平台请求（用于方法下发后的实际请求）
-        const targetUrl = searchParams.get('url');
-        if (!targetUrl) {
-          return NextResponse.json(
-            { error: '缺少 url 参数' },
-            { status: 400 }
-          );
-        }
-
-        // 使用完整 URL 作为缓存键
-        const cacheKey = `proxy-${targetUrl}`;
+        const cacheKey = `toplists-${platform}`;
         const cached = serverCache.proxyRequests.get(cacheKey);
 
         if (cached && Date.now() - cached.timestamp < serverCache.CACHE_DURATION) {
-          console.log(`使用缓存: proxy request`);
           return NextResponse.json(cached.data);
         }
 
-        // 获取其他查询参数
-        const params = new URLSearchParams();
-        searchParams.forEach((value, key) => {
-          if (key !== 'action' && key !== 'url') {
-            params.append(key, value);
-          }
+        const data = await executeMethod(baseUrl, platform, 'toplists');
+        serverCache.proxyRequests.set(cacheKey, { data, timestamp: Date.now() });
+
+        return NextResponse.json(data);
+      }
+
+      case 'toplist': {
+        // 获取排行榜详情
+        const platform = searchParams.get('platform');
+        const id = searchParams.get('id');
+
+        if (!platform || !id) {
+          return NextResponse.json(
+            { error: '缺少 platform 或 id 参数' },
+            { status: 400 }
+          );
+        }
+
+        const cacheKey = `toplist-${platform}-${id}`;
+        const cached = serverCache.proxyRequests.get(cacheKey);
+
+        if (cached && Date.now() - cached.timestamp < serverCache.CACHE_DURATION) {
+          return NextResponse.json(cached.data);
+        }
+
+        const data = await executeMethod(baseUrl, platform, 'toplist', { id });
+        serverCache.proxyRequests.set(cacheKey, { data, timestamp: Date.now() });
+
+        return NextResponse.json(data);
+      }
+
+      case 'playlist': {
+        // 获取歌单详情
+        const platform = searchParams.get('platform');
+        const id = searchParams.get('id');
+
+        if (!platform || !id) {
+          return NextResponse.json(
+            { error: '缺少 platform 或 id 参数' },
+            { status: 400 }
+          );
+        }
+
+        const cacheKey = `playlist-${platform}-${id}`;
+        const cached = serverCache.proxyRequests.get(cacheKey);
+
+        if (cached && Date.now() - cached.timestamp < serverCache.CACHE_DURATION) {
+          return NextResponse.json(cached.data);
+        }
+
+        const data = await executeMethod(baseUrl, platform, 'playlist', { id });
+        serverCache.proxyRequests.set(cacheKey, { data, timestamp: Date.now() });
+
+        return NextResponse.json(data);
+      }
+
+      case 'search': {
+        // 搜索歌曲
+        const platform = searchParams.get('platform');
+        const keyword = searchParams.get('keyword');
+        const page = searchParams.get('page') || '0';
+        const pageSize = searchParams.get('pageSize') || '20';
+
+        if (!platform || !keyword) {
+          return NextResponse.json(
+            { error: '缺少 platform 或 keyword 参数' },
+            { status: 400 }
+          );
+        }
+
+        const cacheKey = `search-${platform}-${keyword}-${page}-${pageSize}`;
+        const cached = serverCache.proxyRequests.get(cacheKey);
+
+        if (cached && Date.now() - cached.timestamp < serverCache.CACHE_DURATION) {
+          return NextResponse.json(cached.data);
+        }
+
+        const data = await executeMethod(baseUrl, platform, 'search', {
+          keyword,
+          page,
+          pageSize,
         });
-
-        const fullUrl = params.toString()
-          ? `${targetUrl}?${params.toString()}`
-          : targetUrl;
-
-        const response = await proxyRequest(fullUrl);
-        const data = await response.json();
-
-        serverCache.proxyRequests.set(cacheKey, {
-          data,
-          timestamp: Date.now(),
-        });
+        serverCache.proxyRequests.set(cacheKey, { data, timestamp: Date.now() });
 
         return NextResponse.json(data);
       }
@@ -299,29 +359,6 @@ export async function POST(request: NextRequest) {
             error: (error as Error).message,
           });
         }
-      }
-
-      case 'proxy-post': {
-        // 代理 POST 请求到上游平台
-        const { url, data: postData, headers } = body;
-        if (!url) {
-          return NextResponse.json(
-            { error: '缺少 url 参数' },
-            { status: 400 }
-          );
-        }
-
-        const response = await proxyRequest(url, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            ...headers,
-          },
-          body: JSON.stringify(postData),
-        });
-
-        const responseData = await response.json();
-        return NextResponse.json(responseData);
       }
 
       default:

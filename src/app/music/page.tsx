@@ -207,41 +207,10 @@ export default function MusicPage() {
     setLoading(true);
     try {
       const response = await fetch(
-        `/api/music?action=method-config&platform=${source}&function=toplists`
+        `/api/music?action=toplists&platform=${source}`
       );
-      const configData = await response.json();
-
-      if (configData.code === 0 && configData.data) {
-        const config = configData.data;
-        const url = new URL(config.url);
-
-        // 添加参数
-        if (config.params) {
-          Object.entries(config.params).forEach(([key, value]) => {
-            url.searchParams.append(key, String(value));
-          });
-        }
-
-        // 通过后端代理请求
-        const proxyResponse = await fetch(
-          `/api/music?action=proxy&url=${encodeURIComponent(url.toString())}`
-        );
-        const data = await proxyResponse.json();
-
-        // 使用 transform 函数处理数据
-        if (config.transform) {
-          try {
-            const transformFn = eval(`(${config.transform})`);
-            const transformed = transformFn(data);
-            setPlaylists(transformed || []);
-          } catch (err) {
-            console.error('Transform 函数执行失败:', err);
-            setPlaylists(data.list || data.data || []);
-          }
-        } else {
-          setPlaylists(data.list || data.data || []);
-        }
-      }
+      const data = await response.json();
+      setPlaylists(data || []);
     } catch (error) {
       console.error('加载排行榜失败:', error);
     } finally {
@@ -254,47 +223,12 @@ export default function MusicPage() {
     setLoading(true);
     try {
       const response = await fetch(
-        `/api/music?action=method-config&platform=${currentSource}&function=toplist`
+        `/api/music?action=toplist&platform=${currentSource}&id=${playlistId}`
       );
-      const configData = await response.json();
-
-      if (configData.code === 0 && configData.data) {
-        const config = configData.data;
-        let url = config.url;
-
-        // 替换模板变量
-        if (config.params) {
-          const params = new URLSearchParams();
-          Object.entries(config.params).forEach(([key, value]) => {
-            const processedValue = String(value).replace('{{id}}', playlistId);
-            params.append(key, processedValue);
-          });
-          url = `${url}?${params.toString()}`;
-        }
-
-        // 通过后端代理请求
-        const proxyResponse = await fetch(
-          `/api/music?action=proxy&url=${encodeURIComponent(url)}`
-        );
-        const data = await proxyResponse.json();
-
-        // 使用 transform 函数处理数据
-        if (config.transform) {
-          try {
-            const transformFn = eval(`(${config.transform})`);
-            const transformed = transformFn(data);
-            setSongs(transformed || []);
-          } catch (err) {
-            console.error('Transform 函数执行失败:', err);
-            setSongs(data.songs || data.data || []);
-          }
-        } else {
-          setSongs(data.songs || data.data || []);
-        }
-
-        setCurrentPlaylistTitle(playlistName);
-        setCurrentView('songs');
-      }
+      const data = await response.json();
+      setSongs(data || []);
+      setCurrentPlaylistTitle(playlistName);
+      setCurrentView('songs');
     } catch (error) {
       console.error('加载歌单失败:', error);
     } finally {
@@ -309,57 +243,12 @@ export default function MusicPage() {
     setLoading(true);
     try {
       const response = await fetch(
-        `/api/music?action=method-config&platform=${currentSource}&function=search`
+        `/api/music?action=search&platform=${currentSource}&keyword=${encodeURIComponent(searchKeyword)}&page=1&pageSize=20`
       );
-      const configData = await response.json();
-
-      if (configData.code === 0 && configData.data) {
-        const config = configData.data;
-        let url = config.url;
-
-        // 替换模板变量
-        if (config.params) {
-          const params = new URLSearchParams();
-          Object.entries(config.params).forEach(([key, value]) => {
-            let processedValue = String(value)
-              .replace('{{keyword}}', searchKeyword)
-              .replace('{{page}}', '1')
-              .replace('{{limit}}', '20')
-              .replace('{{pageSize}}', '20');
-
-            // 处理复杂表达式
-            if (processedValue.includes('{{')) {
-              processedValue = processedValue.replace(/\{\{.*?\}\}/g, '0');
-            }
-
-            params.append(key, processedValue);
-          });
-          url = `${url}?${params.toString()}`;
-        }
-
-        // 通过后端代理请求
-        const proxyResponse = await fetch(
-          `/api/music?action=proxy&url=${encodeURIComponent(url)}`
-        );
-        const data = await proxyResponse.json();
-
-        // 使用 transform 函数处理数据
-        if (config.transform) {
-          try {
-            const transformFn = eval(`(${config.transform})`);
-            const transformed = transformFn(data);
-            setSongs(transformed || []);
-          } catch (err) {
-            console.error('Transform 函数执行失败:', err);
-            setSongs(data.songs || data.data || []);
-          }
-        } else {
-          setSongs(data.songs || data.data || []);
-        }
-
-        setCurrentPlaylistTitle(`搜索: ${searchKeyword}`);
-        setCurrentView('songs');
-      }
+      const data = await response.json();
+      setSongs(data || []);
+      setCurrentPlaylistTitle(`搜索: ${searchKeyword}`);
+      setCurrentView('songs');
     } catch (error) {
       console.error('搜索失败:', error);
     } finally {
