@@ -568,14 +568,7 @@ export async function POST(request: NextRequest) {
         const idsKey = Array.isArray(ids) ? ids.join(',') : ids;
         const cacheKey = `parse-${platform}-${idsKey}-${qualityKey}`;
 
-        // 1. 先检查内存缓存
-        const cached = serverCache.proxyRequests.get(cacheKey);
-        if (cached && Date.now() - cached.timestamp < serverCache.CACHE_DURATION) {
-          console.log('[Music Cache] 从内存缓存返回');
-          return NextResponse.json(cached.data);
-        }
-
-        // 2. 检查 OpenList 缓存
+        // 1. 获取 OpenList 配置
         const openListClient = await getOpenListClient();
         const config = await getConfig();
         const cachePath = config?.MusicConfig?.OpenListCachePath || '/music-cache';
@@ -583,6 +576,32 @@ export async function POST(request: NextRequest) {
         console.log('[Music Cache] OpenList 客户端状态:', openListClient ? '已创建' : '未创建');
         console.log('[Music Cache] 缓存路径:', cachePath);
 
+        // 2. 检查内存缓存
+        const cached = serverCache.proxyRequests.get(cacheKey);
+        if (cached && Date.now() - cached.timestamp < serverCache.CACHE_DURATION) {
+          // 如果启用了 OpenList，需要检查并替换音频 URL
+          if (openListClient) {
+            console.log('[Music Cache] 内存缓存存在，检查并替换 OpenList 音频 URL');
+            const updatedData = await replaceAudioUrlsWithOpenList(
+              cached.data,
+              openListClient,
+              platform,
+              qualityKey,
+              cachePath
+            );
+
+            // 更新内存缓存
+            serverCache.proxyRequests.set(cacheKey, { data: updatedData, timestamp: Date.now() });
+
+            return NextResponse.json(updatedData);
+          } else {
+            // 没有 OpenList 配置，直接返回内存缓存
+            console.log('[Music Cache] 从内存缓存返回');
+            return NextResponse.json(cached.data);
+          }
+        }
+
+        // 3. 检查 OpenList JSON 缓存
         if (openListClient) {
           try {
             const openListPath = `${cachePath}/${platform}/${idsKey}-${qualityKey}.json`;
@@ -594,12 +613,21 @@ export async function POST(request: NextRequest) {
               const cacheResponse = await fetch(fileResponse.data.raw_url);
               if (cacheResponse.ok) {
                 const cachedData = await cacheResponse.json();
-                console.log('[Music Cache] 从 OpenList 缓存返回');
+                console.log('[Music Cache] 从 OpenList JSON 缓存读取成功，检查并替换音频 URL');
+
+                // 检查并替换音频 URL
+                const updatedData = await replaceAudioUrlsWithOpenList(
+                  cachedData,
+                  openListClient,
+                  platform,
+                  qualityKey,
+                  cachePath
+                );
 
                 // 更新内存缓存
-                serverCache.proxyRequests.set(cacheKey, { data: cachedData, timestamp: Date.now() });
+                serverCache.proxyRequests.set(cacheKey, { data: updatedData, timestamp: Date.now() });
 
-                return NextResponse.json(cachedData);
+                return NextResponse.json(updatedData);
               }
             }
           } catch (error) {
@@ -607,7 +635,7 @@ export async function POST(request: NextRequest) {
           }
         }
 
-        // 3. 调用 TuneHub API 解析
+        // 4. 调用 TuneHub API 解析
         try {
           console.log('[Music Cache] 调用 TuneHub API 解析');
           const response = await proxyRequest(`${baseUrl}/v1/parse`, {
@@ -635,10 +663,10 @@ export async function POST(request: NextRequest) {
             });
           }
 
-          // 4. 缓存成功的解析结果到内存
+          // 5. 缓存成功的解析结果到内存
           serverCache.proxyRequests.set(cacheKey, { data, timestamp: Date.now() });
 
-          // 5. 检查并替换音频 URL 为 OpenList URL（如果已缓存）
+          // 6. 检查并替换音频 URL 为 OpenList URL（如果已缓存）
           // 同时异步下载未缓存的音频
           const finalData = await replaceAudioUrlsWithOpenList(
             data,
@@ -648,7 +676,7 @@ export async function POST(request: NextRequest) {
             cachePath
           );
 
-          // 6. 缓存解析结果到 OpenList（异步，不阻塞响应）
+          // 7. 缓存解析结果到 OpenList（异步，不阻塞响应）
           if (openListClient) {
             const jsonPath = `${cachePath}/${platform}/${idsKey}-${qualityKey}.json`;
             openListClient.uploadFile(jsonPath, JSON.stringify(finalData, null, 2))
